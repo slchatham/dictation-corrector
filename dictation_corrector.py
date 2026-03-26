@@ -257,7 +257,10 @@ def _run_ui_mode() -> None:
 
     def _pick_file() -> None:
         from tkinter import filedialog
+        root.lift()
+        root.focus_force()
         path = filedialog.askopenfilename(
+            parent=root,
             title="Import audio file",
             filetypes=[
                 ("Audio files", "*.wav *.mp3 *.m4a *.flac *.ogg"),
