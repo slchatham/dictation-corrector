@@ -883,7 +883,7 @@ def _run_daemon_mode() -> None:
                 _mode_item_ref[0].title = "Switch to STREAMING mode"
 
     # ── UI command handler ────────────────────────────────────────────────────
-    _muted = [False]
+    _muted = [True]
 
     def _mute_toggle() -> None:
         _muted[0] = not _muted[0]
@@ -981,7 +981,9 @@ def _run_daemon_mode() -> None:
         def _boot(self) -> None:
             # 1. Start UI
             ui.ensure_alive()
-            ui.send({"t": "mode", "v": "STREAMING"})
+            ui.send({"t": "mode",  "v": "STREAMING"})
+            audio.set_muted(True)
+            ui.send({"t": "muted", "v": True})
 
             # 2. Keyboard shortcuts
             ok = _HotkeyListener().start()
