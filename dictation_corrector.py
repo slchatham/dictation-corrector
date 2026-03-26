@@ -362,17 +362,21 @@ def _run_ui_mode() -> None:
     def read_stdin() -> None:
         import io
         reader = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
-        for raw in reader:
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                msg = json.loads(raw)
-                root.after(0, lambda m=msg: handle_msg(m))
-            except Exception as exc:
-                log(f"stdin parse: {exc}", "ERR")
-        log("Stdin closed (daemon stopped), closing UI")
-        root.after(0, root.destroy)
+        try:
+            for raw in reader:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    msg = json.loads(raw)
+                    root.after(0, lambda m=msg: handle_msg(m))
+                except Exception as exc:
+                    log(f"stdin parse: {exc}", "ERR")
+            # EOF: daemon stopped externally
+            log("Stdin closed (daemon stopped), closing UI")
+            root.after(0, root.destroy)
+        except (ValueError, OSError):
+            pass  # stdin closed after Quit — normal exit path
 
     threading.Thread(target=read_stdin, daemon=True).start()
 
@@ -385,6 +389,10 @@ def _run_ui_mode() -> None:
     log("Tkinter window opened")
     root.mainloop()
     log("Tkinter window closed")
+    try:
+        sys.stdin.buffer.close()   # unblock read_stdin thread before interpreter shutdown
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
