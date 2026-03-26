@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+
+# NeMo / HuggingFace model cache
+.nemo/
+*.nemo
+~/.cache/huggingface/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE / local tooling
+.claude/
+.vscode/
+.idea/
+
+# Logs
+*.log
