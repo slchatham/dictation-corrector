@@ -41,7 +41,7 @@ OLLAMA_MODEL   = "qwen3.5:4b"
 PARAKEET_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE    = 16000
 CHUNK_SECONDS        = 4
-IMPORT_CHUNK_SECONDS = 12 * 60   # 12 min per chunk — within Parakeet's full-attention range
+IMPORT_CHUNK_SECONDS = 3 * 60    # 3 min per chunk — attention is quadratic, 12 min was too slow
 
 SYSTEM_PROMPT = """\
 Tu es un correcteur de dictée vocale pour un auteur bilingue français/anglais.
