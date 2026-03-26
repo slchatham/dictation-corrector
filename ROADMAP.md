@@ -26,4 +26,4 @@
 
 ### Projet
 - [x] **git + .gitignore** — initialiser le dépôt, ignorer `__pycache__`, `.nemo`, modèles cachés, `.env`
-- [ ] **README** — installation, dépendances, lancement, architecture, raccourcis clavier
+- [x] **README** — installation, dépendances, lancement, architecture (diagramme Mermaid), raccourcis clavier
