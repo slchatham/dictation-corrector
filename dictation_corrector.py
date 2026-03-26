@@ -406,22 +406,33 @@ def _run_daemon_mode() -> None:
     class _UIBridge:
         def __init__(self) -> None:
             self._proc: subprocess.Popen | None = None
-            self._lock = threading.Lock()
+            self._lock   = threading.Lock()
+            self._reader: threading.Thread | None = None
             atexit.register(self._cleanup)
 
         def _cleanup(self) -> None:
+            proc = None
             with self._lock:
                 if self._proc and self._proc.poll() is None:
-                    log("Closing UI subprocess…")
-                    try:
-                        self._proc.stdin.close()
-                    except Exception:
-                        pass
-                    self._proc.terminate()
-                    try:
-                        self._proc.wait(timeout=2)
-                    except Exception:
-                        self._proc.kill()
+                    proc = self._proc
+            if proc is None:
+                return
+            log("Closing UI subprocess…")
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                proc.kill()
+            try:
+                proc.stdout.close()   # unblocks _read_commands thread
+            except Exception:
+                pass
+            if self._reader and self._reader.is_alive():
+                self._reader.join(timeout=1)
 
         def ensure_alive(self) -> None:
             with self._lock:
@@ -434,11 +445,12 @@ def _run_daemon_mode() -> None:
                         stderr = sys.stderr,
                     )
                     log(f"UI subprocess PID {self._proc.pid}", "OK")
-                    threading.Thread(
+                    self._reader = threading.Thread(
                         target = self._read_commands,
                         args   = (self._proc,),
                         daemon = True,
-                    ).start()
+                    )
+                    self._reader.start()
 
         def send(self, msg: dict) -> None:
             with self._lock:
@@ -453,18 +465,21 @@ def _run_daemon_mode() -> None:
         def _read_commands(self, proc: subprocess.Popen) -> None:
             import io
             reader = io.TextIOWrapper(proc.stdout, encoding="utf-8")
-            for raw in reader:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    cmd = json.loads(raw)
-                    log(f"UI command: {cmd}")
-                    handler = _ui_cmd_handler[0]
-                    if handler:
-                        handler(cmd)
-                except Exception as exc:
-                    log(f"UI cmd parse: {exc}", "ERR")
+            try:
+                for raw in reader:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        cmd = json.loads(raw)
+                        log(f"UI command: {cmd}")
+                        handler = _ui_cmd_handler[0]
+                        if handler:
+                            handler(cmd)
+                    except Exception as exc:
+                        log(f"UI cmd parse: {exc}", "ERR")
+            except (ValueError, OSError):
+                pass  # pipe closed during shutdown
 
     ui = _UIBridge()
 
@@ -622,6 +637,14 @@ def _run_daemon_mode() -> None:
                     self._chunk_n = 0
             log(f"Microphone {'muted' if muted else 'active'}", "OK")
 
+        def close(self) -> None:
+            if self._stream is not None:
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    pass
+
         def _callback(self, indata, frames, time, status) -> None:
             if status:
                 log(f"Audio status: {status}", "WARN")
@@ -644,6 +667,7 @@ def _run_daemon_mode() -> None:
                         _transcription_queue.put(chunk)
 
     audio = _AudioEngine()
+    atexit.register(audio.close)
 
     # ── Transcription worker (dedicated thread) ───────────────────────────────
     def _transcription_worker() -> None:
