@@ -1,7 +1,7 @@
 # Dictation Corrector v2
 
 Real-time dictation correction for bilingual (French/English) authors on macOS.
-Captures microphone audio, transcribes with **Parakeet ASR**, then corrects ASR errors with **Qwen3.5:4b** via Ollama — all in a persistent floating window.
+Captures microphone audio, transcribes with **Parakeet TDT v3** (25 languages), then corrects ASR errors with **Qwen3.5:4b** via Ollama — all in a persistent floating window.
 
 ---
 
@@ -15,7 +15,7 @@ graph TD
         AE["Audio Engine\n4 s chunks or batch recording"]
         TQ(["Transcription Queue"])
         TW["Transcription Worker\n(dedicated thread)"]
-        PE["Parakeet Engine\nnvidia/parakeet-tdt-0.6b-v3\nMPS · CPU fallback"]
+        PE["Parakeet Engine\nnvidia/parakeet-tdt-0.6b-v3\n25 languages · MPS · CPU fallback"]
         BUF[("Transcript Buffer")]
         LC["LLM Correction\nhttpx streaming"]
         HK["Hotkey Listener\n(pynput)\nCmd+Shift+K · Cmd+Shift+R"]
@@ -24,7 +24,7 @@ graph TD
     end
 
     subgraph UI["UI subprocess — tkinter / Tk"]
-        WIN["Floating Window\nPARAKEET TRANSCRIPTION\nQWEN3.5 CORRECTION\nstatus bar · buttons"]
+        WIN["Floating Window\nPARAKEET TRANSCRIPTION  [Copy]\nQWEN3.5 CORRECTION  [Copy]\nstatus bar · buttons"]
     end
 
     OLLAMA["Ollama\nqwen3.5:4b\nlocalhost:11434"]
@@ -69,6 +69,7 @@ graph TD
 | `nemo_toolkit[asr]` | Parakeet ASR model |
 | `torch` / `torchaudio` | Inference backend (MPS on Apple Silicon) |
 | `sounddevice` + `soundfile` | Mic capture and WAV I/O |
+| `librosa` | Audio file loading and resampling (import mode) |
 | `httpx` | Streaming HTTP to Ollama |
 | `pynput` | Global keyboard shortcuts |
 | `rumps` | macOS menu bar app |
@@ -84,16 +85,19 @@ graph TD
 python3 --version
 
 # 2. Python packages
-pip install nemo_toolkit[asr] sounddevice soundfile numpy httpx pynput rumps pyperclip
+pip install nemo_toolkit[asr] sounddevice soundfile numpy httpx pynput rumps pyperclip librosa
 
 # 3. Ollama + model
 brew install ollama
 ollama pull qwen3.5:4b
 
-# 4. Microphone permission
+# 4. ffmpeg — required for MP3 / M4A import
+brew install ffmpeg
+
+# 5. Microphone permission
 # System Settings → Privacy & Security → Microphone → allow Terminal
 
-# 5. Accessibility permission (for global hotkeys)
+# 6. Accessibility permission (for global hotkeys)
 # System Settings → Privacy & Security → Accessibility → allow Terminal
 ```
 
@@ -107,7 +111,7 @@ ollama pull qwen3.5:4b
 python dictation_corrector.py
 ```
 
-An environment check runs first (Python version, packages, PyTorch/MPS, Parakeet cache, microphone, Ollama). If all prerequisites pass, the menu bar icon `✍️` and the floating window appear.
+An environment check runs first (Python version, packages, PyTorch/MPS, Parakeet cache, microphone, Ollama). If all prerequisites pass, the menu bar icon `✍️` and the floating window appear. **The microphone starts muted** — click 🔇 to activate.
 
 ### Keyboard shortcuts
 
@@ -123,7 +127,7 @@ An environment check runs first (Python version, packages, PyTorch/MPS, Parakeet
 | Mode (STREAMING / FILE) | Toggle audio capture mode |
 | Correct now | Trigger LLM correction immediately |
 | 🎙 Active / 🔇 Muted | Toggle microphone |
-| Copy | Copy corrected text to clipboard |
+| Copy *(per panel)* | Copy Parakeet or Qwen text to clipboard |
 | Clear | Clear both transcript and correction buffers |
 | Import… | Open a WAV / MP3 / M4A / FLAC / OGG file, transcribe and correct it |
 | Quit | Clean shutdown |
@@ -136,15 +140,15 @@ An environment check runs first (Python version, packages, PyTorch/MPS, Parakeet
 
 **FILE** — press `Cmd+Shift+R` to start, press again to stop; the full recording is transcribed as a single batch and corrected automatically.
 
-**Import** — click `Import…` to open an existing audio file (WAV, MP3, M4A, FLAC, OGG). The file is loaded via librosa (requires `ffmpeg` for MP3/M4A), resampled to 16 kHz mono, then passed through the same Parakeet → Qwen pipeline. Requires `brew install ffmpeg` for non-WAV formats.
+**Import** — click `Import…` to open an existing audio file (WAV, MP3, M4A, FLAC, OGG). The file is loaded via librosa, resampled to 16 kHz mono, then split into silence-aware chunks (~90 s target, cuts at the last natural pause within the final 15 s). Each chunk is transcribed by **Parakeet v3** (25 languages, automatic language detection) then corrected by Qwen3.5. Requires `brew install ffmpeg` for non-WAV formats.
 
 ---
 
 ## Correction prompt
 
-Qwen3.5 is instructed to fix **only**:
-1. English words phonetically mangled by the ASR (e.g. `"baguette"` → `"backlog"`)
+Qwen3.5 is instructed to fix **only** (and only when confidence > 95%):
+1. Words manifestly phonetized by the ASR (e.g. `"baguette"` → `"backlog"`)
 2. Obvious phonetic transcription errors in the current language
 3. Orally dictated punctuation (`"virgule"` → `,`, `"point"` → `.`)
 
-It **never** translates between languages — intentional English stays English, French stays French.
+It **never** translates between languages, adds words absent from the source, or reformulates content.

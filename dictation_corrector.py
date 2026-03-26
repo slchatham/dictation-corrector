@@ -41,15 +41,16 @@ OLLAMA_MODEL   = "qwen3.5:4b"
 PARAKEET_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE    = 16000
 CHUNK_SECONDS        = 4
-IMPORT_CHUNK_SECONDS = 3 * 60    # 3 min per chunk — attention is quadratic, 12 min was too slow
+IMPORT_TARGET_SECONDS  = 90   # target chunk duration for import
+IMPORT_SILENCE_SEARCH  = 15   # look for silence in the last N seconds of each target chunk
 
 SYSTEM_PROMPT = """\
 Tu es un correcteur de dictée vocale pour un auteur bilingue français/anglais.
 Le texte t'est envoyé tel que capturé par un ASR. L'auteur alterne librement entre les deux langues.
 
-Corrige UNIQUEMENT ces trois cas :
-1. Mot anglais phonétisé à la française par l'ASR  →  rétablis l'orthographe anglaise
-   ex : "à l'échelle" → "at scale", "dîtes" → "data", "baguette" → "backlog"
+Corrige UNIQUEMENT ces trois cas, et seulement si tu en es certain à plus de 95% :
+1. Mot manifestement phonétisé par l'ASR (ex : "baguette" → "backlog", "dîtes" → "data")
+   — si le mot est ambigu ou pourrait être intentionnel, laisse-le tel quel
 2. Erreur de transcription phonétique évidente dans la langue en cours
    ex : "pansant" → "pensant",  "their" → "there"
 3. Mot de ponctuation dicté oralement
@@ -57,8 +58,10 @@ Corrige UNIQUEMENT ces trois cas :
 
 NE JAMAIS :
 - traduire une phrase d'une langue à l'autre (l'anglais intentionnel reste anglais, le français reste français)
+- ajouter un mot qui n'est pas dans le texte source
 - reformuler, compléter ou corriger le fond
 - modifier la ponctuation existante
+- corriger un mot si tu n'es pas sûr à plus de 95%
 
 Retourne uniquement le texte corrigé, sans commentaire ni explication.\
 """
@@ -192,10 +195,22 @@ def _run_ui_mode() -> None:
     tk.Label(hdr, text="Mode:", bg=C["bg"], fg=C["dim"],
              font=("Helvetica Neue", 10)).pack(side="right", padx=(0, 4))
 
+    # ── Copy helper ───────────────────────────────────────────────────────────
+    def _copy_widget(w: tk.Text, btn: tk.Button) -> None:
+        w.config(state="normal")
+        text = w.get("1.0", "end").strip()
+        w.config(state="disabled")
+        if text:
+            pyperclip.copy(text)
+            btn.config(text="✓")
+            root.after(2000, lambda: btn.config(text="Copy"))
+
     # ── Raw Parakeet transcription ────────────────────────────────────────────
-    tk.Label(root, text="  PARAKEET TRANSCRIPTION",
+    hdr_raw = tk.Frame(root, bg=C["bg"])
+    hdr_raw.pack(fill="x", padx=14, pady=(4, 2))
+    tk.Label(hdr_raw, text="PARAKEET TRANSCRIPTION",
              bg=C["bg"], fg=C["dim"],
-             font=("Helvetica Neue", 9)).pack(anchor="w", padx=14, pady=(4, 2))
+             font=("Helvetica Neue", 9)).pack(side="left")
 
     f_raw = tk.Frame(root, bg=C["surface"])
     f_raw.pack(fill="x", padx=12, pady=(0, 8))
@@ -207,10 +222,20 @@ def _run_ui_mode() -> None:
     )
     w_raw.pack(fill="both")
 
+    raw_copy_btn = tk.Button(
+        hdr_raw, text="Copy",
+        bg=C["surface"], fg=C["sub"], activebackground=C["overlay"],
+        font=("Helvetica Neue", 9), bd=0, relief="flat", padx=8, pady=2,
+        command=lambda: _copy_widget(w_raw, raw_copy_btn),
+    )
+    raw_copy_btn.pack(side="right")
+
     # ── Qwen3.5 correction ───────────────────────────────────────────────────
-    tk.Label(root, text="  QWEN3.5 CORRECTION",
+    hdr_corr = tk.Frame(root, bg=C["bg"])
+    hdr_corr.pack(fill="x", padx=14, pady=(0, 2))
+    tk.Label(hdr_corr, text="QWEN3.5 CORRECTION",
              bg=C["bg"], fg=C["dim"],
-             font=("Helvetica Neue", 9)).pack(anchor="w", padx=14, pady=(0, 2))
+             font=("Helvetica Neue", 9)).pack(side="left")
 
     f_corr = tk.Frame(root, bg=C["surface"])
     f_corr.pack(fill="both", expand=True, padx=12, pady=(0, 8))
@@ -221,6 +246,14 @@ def _run_ui_mode() -> None:
         height=9, padx=10, pady=8, state="disabled",
     )
     w_corr.pack(fill="both", expand=True)
+
+    corr_copy_btn = tk.Button(
+        hdr_corr, text="Copy",
+        bg=C["surface"], fg=C["sub"], activebackground=C["overlay"],
+        font=("Helvetica Neue", 9), bd=0, relief="flat", padx=8, pady=2,
+        command=lambda: _copy_widget(w_corr, corr_copy_btn),
+    )
+    corr_copy_btn.pack(side="right")
 
     # ── Status bar ────────────────────────────────────────────────────────────
     tk.Label(root, textvariable=status_var,
@@ -277,23 +310,6 @@ def _run_ui_mode() -> None:
         command=_pick_file,
     ).pack(side="left", padx=(0, 8))
 
-    def copy_corrected() -> None:
-        w_corr.config(state="normal")
-        text = w_corr.get("1.0", "end").strip()
-        w_corr.config(state="disabled")
-        if text:
-            pyperclip.copy(text)
-            copy_btn.config(text="✓  Copied!")
-            root.after(2000, lambda: copy_btn.config(text="Copy"))
-
-    copy_btn = tk.Button(
-        bf, text="Copy",
-        bg=C["blue"], fg=C["bg"], activebackground=C["sub"],
-        font=("Helvetica Neue", 11, "bold"), bd=0, relief="flat", padx=12, pady=7,
-        command=copy_corrected,
-    )
-    copy_btn.pack(side="right")
-
     tk.Button(
         bf, text="Clear",
         bg=C["overlay"], fg=C["sub"], activebackground=C["dim"],
@@ -318,6 +334,7 @@ def _run_ui_mode() -> None:
         w.delete("1.0", "end")
         w.insert("1.0", text)
         w.config(state="disabled")
+        w.see("end")
 
     def _append_widget(w: tk.Text, text: str) -> None:
         w.config(state="normal")
@@ -334,7 +351,7 @@ def _run_ui_mode() -> None:
         elif t == "mode":
             mode_var.set(v)
             if v == "FICHIER":
-                rec_btn.pack(side="left", padx=(0, 8), before=copy_btn)
+                rec_btn.pack(side="left", padx=(0, 8))
             else:
                 rec_btn.pack_forget()
         elif t == "transcript":
@@ -811,9 +828,44 @@ def _run_daemon_mode() -> None:
             total_dur = len(audio_np) / SAMPLE_RATE
             log(f"Loaded {name}: {total_dur/60:.1f} min")
 
-            chunk_len = SAMPLE_RATE * IMPORT_CHUNK_SECONDS
-            starts    = list(range(0, len(audio_np), chunk_len))
-            n_chunks  = len(starts)
+            # ── Silence-based chunking ─────────────────────────────────────
+            def _silence_chunks(audio: np.ndarray) -> list[tuple[int, int]]:
+                """
+                Split audio into chunks of ~IMPORT_TARGET_SECONDS by finding the
+                last silence within the final IMPORT_SILENCE_SEARCH seconds of
+                each target boundary. Falls back to hard cut if no silence found.
+                """
+                target  = SAMPLE_RATE * IMPORT_TARGET_SECONDS
+                search  = SAMPLE_RATE * IMPORT_SILENCE_SEARCH
+                frame   = int(SAMPLE_RATE * 0.05)   # 50 ms energy frames
+                thr_rms = 10 ** (-38 / 20)           # –38 dBFS silence threshold
+
+                bounds: list[tuple[int, int]] = []
+                pos = 0
+                while pos < len(audio):
+                    end = pos + target
+                    if end >= len(audio):
+                        bounds.append((pos, len(audio)))
+                        break
+                    # search window: [end - search, end]
+                    w_start  = max(pos, end - search)
+                    segment  = audio[w_start:end]
+                    n_frames = len(segment) // frame
+                    cut = end   # default: hard cut
+                    if n_frames > 0:
+                        rms = np.array([
+                            np.sqrt(np.mean(segment[f*frame:(f+1)*frame] ** 2))
+                            for f in range(n_frames)
+                        ])
+                        silent = np.where(rms < thr_rms)[0]
+                        if len(silent):
+                            cut = w_start + int(silent[-1]) * frame
+                    bounds.append((pos, cut))
+                    pos = cut
+                return bounds
+
+            chunks_bounds = _silence_chunks(audio_np)
+            n_chunks      = len(chunks_bounds)
 
             def _transcribe_timed(chunk: np.ndarray, label: str) -> str:
                 """Transcribe while updating status bar with elapsed seconds."""
@@ -830,13 +882,13 @@ def _run_daemon_mode() -> None:
                 finally:
                     stop.set()
 
-            for i, start in enumerate(starts):
-                chunk     = audio_np[start : start + chunk_len]
+            for i, (start, end) in enumerate(chunks_bounds):
+                chunk     = audio_np[start:end]
                 chunk_dur = len(chunk) / SAMPLE_RATE
                 t_start   = start / SAMPLE_RATE / 60
-                t_end     = (start + len(chunk)) / SAMPLE_RATE / 60
+                t_end     = end   / SAMPLE_RATE / 60
                 log(f"Chunk {i+1}/{n_chunks}: {t_start:.1f}–{t_end:.1f} min ({chunk_dur:.0f}s)")
-                label = f"Chunk {i+1}/{n_chunks} — Transcribing ({chunk_dur/60:.1f} min)"
+                label = f"Chunk {i+1}/{n_chunks} — Parakeet ({chunk_dur:.0f}s)"
 
                 text = _transcribe_timed(chunk, label)
                 if not text:
