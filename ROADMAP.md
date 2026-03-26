@@ -15,14 +15,15 @@
 ## À faire
 
 ### UX / Interface
-- [ ] **Interface en anglais** — tous les labels, boutons, statuts et messages en anglais
-- [ ] **Bouton Exit** — arrêt propre de l'application depuis la fenêtre (évite Ctrl-C)
+- [x] **Interface en anglais** — tous les labels, boutons, statuts, commentaires et nom du script en anglais
+- [x] **Bouton Exit** — arrêt propre de l'application depuis la fenêtre (évite Ctrl-C)
 - [ ] **Palette color-blind friendly** — remplacer rouge/vert par des combinaisons accessibles (ex : bleu/orange, avec icônes en complément de la couleur)
 
 ### Audio / Transcription
-- [ ] **Augmenter CHUNK_SECONDS** (ex : 4-5s) — donne plus de contexte à Parakeet, réduit les coupures au milieu des phrases et améliore la ponctuation automatique
-- [ ] **Bouton Effacer** — vide le buffer de transcription sans redémarrer le daemon
+- [x] **Augmenter CHUNK_SECONDS** (4s) — donne plus de contexte à Parakeet, réduit les coupures au milieu des phrases et améliore la ponctuation automatique
+- [x] **Bouton Effacer** — vide le buffer de transcription sans redémarrer le daemon
+- [ ] **Import fichier audio** — bouton pour ouvrir un WAV/MP3 (file picker), transcrire via Parakeet, puis corriger via Qwen ; résultat affiché dans la fenêtre comme les autres modes
 
 ### Projet
-- [ ] **git + .gitignore** — initialiser le dépôt, ignorer `__pycache__`, `.nemo`, modèles cachés, `.env`
+- [x] **git + .gitignore** — initialiser le dépôt, ignorer `__pycache__`, `.nemo`, modèles cachés, `.env`
 - [ ] **README** — installation, dépendances, lancement, architecture, raccourcis clavier

@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Dictée Correcteur v2
-Pipeline : Micro → Parakeet ASR (nvidia/parakeet-tdt-0.6b-v3) → Qwen3.5:4b → fenêtre flottante
+Dictation Corrector v2
+Pipeline: Mic → Parakeet ASR (nvidia/parakeet-tdt-0.6b-v3) → Qwen3.5:4b → floating window
 
-Modes audio :
-  STREAMING  capture continue par chunks de 2s, Cmd+Shift+K déclenche la correction
-  FICHIER    Cmd+Shift+R start/stop, transcription batch, correction automatique
+Audio modes:
+  STREAMING  continuous capture in 4s chunks, Cmd+Shift+K triggers correction
+  FILE       Cmd+Shift+R start/stop, batch transcription, automatic correction
 
-Raccourcis :
-  Cmd+Shift+K  correction LLM sur le buffer courant
-  Cmd+Shift+R  start/stop enregistrement (mode FICHIER)
+Shortcuts:
+  Cmd+Shift+K  LLM correction on current buffer
+  Cmd+Shift+R  start/stop recording (FILE mode)
 
-Dépendances :
+Dependencies:
   pip install nemo_toolkit[asr] sounddevice soundfile numpy httpx pynput rumps
 
-Lancement :
-  python dictee_correcteur.py
+Usage:
+  python dictation_corrector.py
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ OLLAMA_URL     = "http://localhost:11434/api/generate"
 OLLAMA_MODEL   = "qwen3.5:4b"
 PARAKEET_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE    = 16000
-CHUNK_SECONDS  = 2
+CHUNK_SECONDS  = 4
 
 SYSTEM_PROMPT = """\
 Tu es un correcteur de dictée vocale pour un auteur bilingue français/anglais.
@@ -74,7 +74,7 @@ def log(msg: str, level: str = "INFO") -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Filtre <think>…</think>  (tokens de réflexion qwen3)
+# <think>…</think> filter  (qwen3 reasoning tokens)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _ThinkFilter:
@@ -121,18 +121,18 @@ class _ThinkFilter:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MODE UI  ──  python dictee_correcteur.py --ui
-# Fenêtre tkinter persistante.
-# Reçoit des mises à jour du daemon via stdin (JSON-lines).
-# Envoie des commandes au daemon via stdout (JSON-lines).
+# UI MODE  ──  python dictation_corrector.py --ui
+# Persistent tkinter window.
+# Receives updates from daemon via stdin (JSON-lines).
+# Sends commands to daemon via stdout (JSON-lines).
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _run_ui_mode() -> None:
     import tkinter as tk
 
-    log("Mode UI démarré")
+    log("UI mode started")
 
-    # ── Palette Catppuccin Mocha ──────────────────────────────────────────────
+    # ── Catppuccin Mocha palette ──────────────────────────────────────────────
     C = dict(
         bg      = "#1e1e2e",
         surface = "#313244",
@@ -147,7 +147,7 @@ def _run_ui_mode() -> None:
         teal    = "#94e2d5",
     )
 
-    # ── Envoyer une commande au daemon via stdout ─────────────────────────────
+    # ── Send a command to the daemon via stdout ───────────────────────────────
     def send_cmd(cmd: dict) -> None:
         try:
             sys.stdout.write(json.dumps(cmd) + "\n")
@@ -155,24 +155,24 @@ def _run_ui_mode() -> None:
         except Exception as exc:
             log(f"send_cmd: {exc}", "ERR")
 
-    # ── Root ─────────────────────────────────────────────────────────────────
+    # ── Window root ──────────────────────────────────────────────────────────
     root = tk.Tk()
-    root.title("Dictée Correcteur v2")
+    root.title("Dictation Corrector v2")
     root.configure(bg=C["bg"])
     root.attributes("-topmost", True)
     root.geometry("700x620")
     root.resizable(True, True)
 
-    # ── Variables dynamiques ──────────────────────────────────────────────────
+    # ── Dynamic variables ─────────────────────────────────────────────────────
     mode_var   = tk.StringVar(value="STREAMING")
-    status_var = tk.StringVar(value="⟳  Chargement Parakeet…")
-    rec_var    = tk.StringVar(value="⏺  Enregistrer")
+    status_var = tk.StringVar(value="⟳  Loading Parakeet…")
+    rec_var    = tk.StringVar(value="⏺  Record")
 
-    # ── Header ───────────────────────────────────────────────────────────────
+    # ── Header ────────────────────────────────────────────────────────────────
     hdr = tk.Frame(root, bg=C["bg"])
     hdr.pack(fill="x", padx=14, pady=(14, 6))
 
-    tk.Label(hdr, text="Dictée Correcteur v2",
+    tk.Label(hdr, text="Dictation Corrector v2",
              bg=C["bg"], fg=C["dim"],
              font=("Helvetica Neue", 10)).pack(side="left")
 
@@ -187,11 +187,11 @@ def _run_ui_mode() -> None:
         padx=10, pady=4, command=toggle_mode,
     )
     mode_btn.pack(side="right")
-    tk.Label(hdr, text="Mode :", bg=C["bg"], fg=C["dim"],
+    tk.Label(hdr, text="Mode:", bg=C["bg"], fg=C["dim"],
              font=("Helvetica Neue", 10)).pack(side="right", padx=(0, 4))
 
-    # ── Transcription brute Parakeet ──────────────────────────────────────────
-    tk.Label(root, text="  TRANSCRIPTION PARAKEET",
+    # ── Raw Parakeet transcription ────────────────────────────────────────────
+    tk.Label(root, text="  PARAKEET TRANSCRIPTION",
              bg=C["bg"], fg=C["dim"],
              font=("Helvetica Neue", 9)).pack(anchor="w", padx=14, pady=(4, 2))
 
@@ -205,8 +205,8 @@ def _run_ui_mode() -> None:
     )
     w_raw.pack(fill="both")
 
-    # ── Correction Qwen3.5 ───────────────────────────────────────────────────
-    tk.Label(root, text="  CORRECTION QWEN3.5",
+    # ── Qwen3.5 correction ───────────────────────────────────────────────────
+    tk.Label(root, text="  QWEN3.5 CORRECTION",
              bg=C["bg"], fg=C["dim"],
              font=("Helvetica Neue", 9)).pack(anchor="w", padx=14, pady=(0, 2))
 
@@ -220,16 +220,16 @@ def _run_ui_mode() -> None:
     )
     w_corr.pack(fill="both", expand=True)
 
-    # ── Barre de statut ───────────────────────────────────────────────────────
+    # ── Status bar ────────────────────────────────────────────────────────────
     tk.Label(root, textvariable=status_var,
              bg=C["bg"], fg=C["blue"],
              font=("Helvetica Neue", 11)).pack(pady=(2, 4))
 
-    # ── Boutons ───────────────────────────────────────────────────────────────
+    # ── Buttons ───────────────────────────────────────────────────────────────
     bf = tk.Frame(root, bg=C["bg"])
     bf.pack(fill="x", padx=12, pady=(0, 14))
 
-    # Bouton enregistrement — visible uniquement en mode FICHIER
+    # Record button — visible only in FILE mode
     rec_btn = tk.Button(
         bf, textvariable=rec_var,
         bg=C["surface"], fg=C["text"], activebackground=C["overlay"],
@@ -238,13 +238,13 @@ def _run_ui_mode() -> None:
     )
 
     tk.Button(
-        bf, text="Corriger maintenant",
+        bf, text="Correct now",
         bg=C["teal"], fg=C["bg"], activebackground=C["sub"],
         font=("Helvetica Neue", 11, "bold"), bd=0, relief="flat", padx=12, pady=7,
         command=lambda: send_cmd({"cmd": "correct_now"}),
     ).pack(side="left", padx=(0, 8))
 
-    mute_var = tk.StringVar(value="🎙 Actif")
+    mute_var = tk.StringVar(value="🎙 Active")
     mute_btn = tk.Button(
         bf, textvariable=mute_var,
         bg=C["surface"], fg=C["green"], activebackground=C["overlay"],
@@ -259,18 +259,36 @@ def _run_ui_mode() -> None:
         w_corr.config(state="disabled")
         if text:
             pyperclip.copy(text)
-            copy_btn.config(text="✓  Copié !")
-            root.after(2000, lambda: copy_btn.config(text="Copier"))
+            copy_btn.config(text="✓  Copied!")
+            root.after(2000, lambda: copy_btn.config(text="Copy"))
 
     copy_btn = tk.Button(
-        bf, text="Copier",
+        bf, text="Copy",
         bg=C["blue"], fg=C["bg"], activebackground=C["sub"],
         font=("Helvetica Neue", 11, "bold"), bd=0, relief="flat", padx=12, pady=7,
         command=copy_corrected,
     )
     copy_btn.pack(side="right")
 
-    # ── Helpers widgets (thread principal) ────────────────────────────────────
+    tk.Button(
+        bf, text="Clear",
+        bg=C["overlay"], fg=C["sub"], activebackground=C["dim"],
+        font=("Helvetica Neue", 11), bd=0, relief="flat", padx=12, pady=7,
+        command=lambda: send_cmd({"cmd": "clear"}),
+    ).pack(side="right", padx=(0, 8))
+
+    def _exit() -> None:
+        send_cmd({"cmd": "exit"})
+        root.after(200, root.destroy)
+
+    tk.Button(
+        bf, text="Quit",
+        bg=C["red"], fg=C["bg"], activebackground=C["overlay"],
+        font=("Helvetica Neue", 11, "bold"), bd=0, relief="flat", padx=12, pady=7,
+        command=_exit,
+    ).pack(side="right", padx=(0, 8))
+
+    # ── Widget helpers (main thread) ──────────────────────────────────────────
     def _set_widget(w: tk.Text, text: str) -> None:
         w.config(state="normal")
         w.delete("1.0", "end")
@@ -283,7 +301,7 @@ def _run_ui_mode() -> None:
         w.config(state="disabled")
         w.see("end")
 
-    # ── Gestionnaire de messages entrants ─────────────────────────────────────
+    # ── Incoming message handler ──────────────────────────────────────────────
     def handle_msg(msg: dict) -> None:
         t = msg.get("t")
         v = msg.get("v")
@@ -306,17 +324,17 @@ def _run_ui_mode() -> None:
                 rec_var.set("⏹  Stop")
                 rec_btn.config(bg=C["red"], fg=C["bg"])
             else:
-                rec_var.set("⏺  Enregistrer")
+                rec_var.set("⏺  Record")
                 rec_btn.config(bg=C["surface"], fg=C["text"])
         elif t == "muted":
             if v:
-                mute_var.set("🔇 Muet")
+                mute_var.set("🔇 Muted")
                 mute_btn.config(bg=C["overlay"], fg=C["dim"])
             else:
-                mute_var.set("🎙 Actif")
+                mute_var.set("🎙 Active")
                 mute_btn.config(bg=C["surface"], fg=C["green"])
 
-    # ── Lecteur stdin (thread d'arrière-plan) ─────────────────────────────────
+    # ── Stdin reader (background thread) ─────────────────────────────────────
     def read_stdin() -> None:
         import io
         reader = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
@@ -329,24 +347,24 @@ def _run_ui_mode() -> None:
                 root.after(0, lambda m=msg: handle_msg(m))
             except Exception as exc:
                 log(f"stdin parse: {exc}", "ERR")
-        log("Stdin fermé (daemon arrêté), fermeture UI")
+        log("Stdin closed (daemon stopped), closing UI")
         root.after(0, root.destroy)
 
     threading.Thread(target=read_stdin, daemon=True).start()
 
-    # ── Centrage ──────────────────────────────────────────────────────────────
+    # ── Center window ─────────────────────────────────────────────────────────
     root.update_idletasks()
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     w, h   = root.winfo_width(), root.winfo_height()
     root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 3}")
 
-    log("Fenêtre tkinter ouverte")
+    log("Tkinter window opened")
     root.mainloop()
-    log("Fenêtre tkinter fermée")
+    log("Tkinter window closed")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MODE DAEMON  ──  python dictee_correcteur.py  (défaut)
+# DAEMON MODE  ──  python dictation_corrector.py  (default)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _run_daemon_mode() -> None:
@@ -356,13 +374,13 @@ def _run_daemon_mode() -> None:
     import sounddevice as sd
     import atexit
 
-    # ── État partagé (listes mutables pour closures) ──────────────────────────
-    _mode      = ["STREAMING"]   # "STREAMING" | "FICHIER"
+    # ── Shared state (mutable lists for closures) ─────────────────────────────
+    _mode      = ["STREAMING"]   # "STREAMING" | "FILE"
     _recording = [False]
-    _transcript = [""]           # buffer de transcription accumulé
+    _transcript = [""]           # accumulated transcription buffer
 
-    # ── UIBridge — IPC bidirectionnel avec le sous-processus tkinter ──────────
-    _ui_cmd_handler = [None]     # défini plus tard, évite la dépendance circulaire
+    # ── UIBridge — bidirectional IPC with the tkinter subprocess ─────────────
+    _ui_cmd_handler = [None]     # set later to break circular dependency
 
     class _UIBridge:
         def __init__(self) -> None:
@@ -373,7 +391,7 @@ def _run_daemon_mode() -> None:
         def _cleanup(self) -> None:
             with self._lock:
                 if self._proc and self._proc.poll() is None:
-                    log("Fermeture sous-processus UI…")
+                    log("Closing UI subprocess…")
                     try:
                         self._proc.stdin.close()
                     except Exception:
@@ -387,14 +405,14 @@ def _run_daemon_mode() -> None:
         def ensure_alive(self) -> None:
             with self._lock:
                 if self._proc is None or self._proc.poll() is not None:
-                    log("Lancement sous-processus UI…")
+                    log("Starting UI subprocess…")
                     self._proc = subprocess.Popen(
                         [sys.executable, __file__, "--ui"],
                         stdin  = subprocess.PIPE,
                         stdout = subprocess.PIPE,
                         stderr = sys.stderr,
                     )
-                    log(f"UI PID {self._proc.pid}", "OK")
+                    log(f"UI subprocess PID {self._proc.pid}", "OK")
                     threading.Thread(
                         target = self._read_commands,
                         args   = (self._proc,),
@@ -420,7 +438,7 @@ def _run_daemon_mode() -> None:
                     continue
                 try:
                     cmd = json.loads(raw)
-                    log(f"Commande UI : {cmd}")
+                    log(f"UI command: {cmd}")
                     handler = _ui_cmd_handler[0]
                     if handler:
                         handler(cmd)
@@ -429,7 +447,7 @@ def _run_daemon_mode() -> None:
 
     ui = _UIBridge()
 
-    # ── Moteur Parakeet ───────────────────────────────────────────────────────
+    # ── Parakeet engine ───────────────────────────────────────────────────────
     class _ParakeetEngine:
         def __init__(self) -> None:
             self._model  = None
@@ -443,9 +461,9 @@ def _run_daemon_mode() -> None:
         @staticmethod
         def _silence_nemo_loggers() -> None:
             """
-            NeMo réinitialise son logging à chaque opération (from_pretrained, transcribe…).
-            On balaie TOUS les loggers enregistrés et on force ERROR sur ceux de NeMo/Lightning.
-            À appeler après le chargement du modèle ET avant chaque transcription.
+            NeMo resets its logging on every operation (from_pretrained, transcribe…).
+            Walk ALL registered loggers and force ERROR level on NeMo/Lightning ones.
+            Call after model load AND before each transcription.
             """
             import logging
             _PREFIXES = ("nemo", "lightning", "pytorch_lightning",
@@ -459,14 +477,14 @@ def _run_daemon_mode() -> None:
 
         def _load(self, on_ready=None) -> None:
             import warnings
-            warnings.filterwarnings("ignore")   # warnings PyTorch/NeMo à l'init
-            self._silence_nemo_loggers()        # passe initiale avant import NeMo
+            warnings.filterwarnings("ignore")   # suppress PyTorch/NeMo warnings at init
+            self._silence_nemo_loggers()        # first pass before NeMo import
             try:
                 import torch
                 import nemo.collections.asr as nemo_asr
 
-                log(f"Chargement {PARAKEET_MODEL}…")
-                ui.send({"t": "status", "v": "⟳  Chargement Parakeet…"})
+                log(f"Loading {PARAKEET_MODEL}…")
+                ui.send({"t": "status", "v": "⟳  Loading Parakeet…"})
 
                 self._model = nemo_asr.models.ASRModel.from_pretrained(PARAKEET_MODEL)
 
@@ -474,23 +492,23 @@ def _run_daemon_mode() -> None:
                     try:
                         self._model = self._model.to("mps")
                         self._device = "mps"
-                        log("Parakeet sur MPS (Apple Silicon)", "OK")
+                        log("Parakeet on MPS (Apple Silicon)", "OK")
                     except Exception as exc:
-                        log(f"MPS indisponible ({exc}), fallback CPU", "WARN")
+                        log(f"MPS unavailable ({exc}), falling back to CPU", "WARN")
                         self._device = "cpu"
                 else:
-                    log("MPS non disponible, Parakeet sur CPU")
+                    log("MPS not available, Parakeet on CPU")
 
                 self._model.eval()
-                self._silence_nemo_loggers()    # re-passe après from_pretrained
-                log(f"Parakeet prêt sur {self._device}", "OK")
+                self._silence_nemo_loggers()    # second pass after from_pretrained
+                log(f"Parakeet ready on {self._device}", "OK")
                 ui.send({"t": "status", "v": "○  Idle"})
                 self.ready.set()
                 if on_ready:
                     on_ready()
 
             except Exception as exc:
-                log(f"Erreur chargement Parakeet : {exc}", "ERR")
+                log(f"Parakeet load error: {exc}", "ERR")
                 ui.send({"t": "status", "v": f"✗  Parakeet : {str(exc)[:80]}"})
 
         def transcribe(self, audio_np: np.ndarray) -> str:
@@ -503,18 +521,18 @@ def _run_daemon_mode() -> None:
                 try:
                     sf.write(fname, audio_np, SAMPLE_RATE)
                     tmp.close()
-                    self._silence_nemo_loggers()    # NeMo recrée des loggers à chaque appel
+                    self._silence_nemo_loggers()    # NeMo recreates loggers on every call
                     result = self._model.transcribe([fname], verbose=False)
-                    # NeMo peut retourner list[str] ou tuple(list[str], ...)
+                    # NeMo may return list[str] or tuple(list[str], ...)
                     if isinstance(result, tuple):
                         result = result[0]
                     text = result[0] if result else ""
-                    # Certaines versions retournent un objet Hypothesis
+                    # Some versions return a Hypothesis object
                     if hasattr(text, "text"):
                         text = text.text
                     return str(text).strip()
                 except Exception as exc:
-                    log(f"transcribe() erreur : {exc}", "ERR")
+                    log(f"transcribe() error: {exc}", "ERR")
                     return ""
                 finally:
                     try:
@@ -524,7 +542,7 @@ def _run_daemon_mode() -> None:
 
     parakeet = _ParakeetEngine()
 
-    # ── Moteur audio (sounddevice) ────────────────────────────────────────────
+    # ── Audio engine (sounddevice) ────────────────────────────────────────────
     _transcription_queue: queue.Queue = queue.Queue()
 
     class _AudioEngine:
@@ -543,16 +561,16 @@ def _run_daemon_mode() -> None:
                     samplerate = SAMPLE_RATE,
                     channels   = 1,
                     dtype      = "float32",
-                    blocksize  = int(SAMPLE_RATE * 0.1),   # blocs 100 ms
+                    blocksize  = int(SAMPLE_RATE * 0.1),   # 100 ms blocks
                     callback   = self._callback,
                 )
                 self._stream.start()
-                log("Stream audio ouvert", "OK")
+                log("Audio stream opened", "OK")
             except Exception as exc:
                 log(f"sounddevice : {exc}", "ERR")
                 if "permission" in str(exc).lower() or "access" in str(exc).lower():
                     ui.send({"t": "status",
-                             "v": "✗  Permission micro refusée — autorisez dans Préférences Système"})
+                             "v": "✗  Microphone permission denied — allow in System Settings"})
                 else:
                     ui.send({"t": "status", "v": f"✗  Micro : {str(exc)[:80]}"})
 
@@ -581,11 +599,11 @@ def _run_daemon_mode() -> None:
                 if muted:
                     self._chunk_buf.clear()
                     self._chunk_n = 0
-            log(f"Micro {'coupé' if muted else 'actif'}", "OK")
+            log(f"Microphone {'muted' if muted else 'active'}", "OK")
 
         def _callback(self, indata, frames, time, status) -> None:
             if status:
-                log(f"Audio status : {status}", "WARN")
+                log(f"Audio status: {status}", "WARN")
             if self._muted:
                 return
             mono = indata[:, 0].copy()
@@ -606,18 +624,18 @@ def _run_daemon_mode() -> None:
 
     audio = _AudioEngine()
 
-    # ── Worker de transcription (thread dédié) ────────────────────────────────
+    # ── Transcription worker (dedicated thread) ───────────────────────────────
     def _transcription_worker() -> None:
-        log("Worker transcription démarré")
+        log("Transcription worker started")
         while True:
             chunk = _transcription_queue.get()
             if chunk is None:
                 break
             if not parakeet.ready.is_set():
-                log("Parakeet pas encore prêt, chunk ignoré", "WARN")
+                log("Parakeet not ready yet, chunk dropped", "WARN")
                 continue
             dur = len(chunk) / SAMPLE_RATE
-            log(f"Transcription chunk {dur:.1f}s…")
+            log(f"Transcribing chunk {dur:.1f}s…")
             ui.send({"t": "status", "v": "◎  Transcription…"})
             text = parakeet.transcribe(chunk)
             if text:
@@ -629,24 +647,24 @@ def _run_daemon_mode() -> None:
 
     threading.Thread(target=_transcription_worker, daemon=True).start()
 
-    # ── Correction LLM ────────────────────────────────────────────────────────
+    # ── LLM correction ────────────────────────────────────────────────────────
     _correction_lock = threading.Lock()
 
     def _trigger_correction(text: str | None = None) -> None:
         text = text or _transcript[0]
         if not text.strip():
-            log("Buffer vide, correction ignorée", "WARN")
-            ui.send({"t": "status", "v": "⚠  Rien à corriger (buffer vide)"})
+            log("Buffer empty, correction skipped", "WARN")
+            ui.send({"t": "status", "v": "⚠  Nothing to correct (buffer empty)"})
             return
         threading.Thread(target=_run_correction, args=(text,), daemon=True).start()
 
     def _run_correction(text: str) -> None:
         if not _correction_lock.acquire(blocking=False):
-            log("Correction déjà en cours", "WARN")
+            log("Correction already in progress", "WARN")
             return
         try:
-            log(f"Correction LLM ({len(text)} car.)…")
-            ui.send({"t": "status", "v": "✦  Correction en cours…"})
+            log(f"LLM correction ({len(text)} chars)…")
+            ui.send({"t": "status", "v": "✦  Correcting…"})
             ui.send({"t": "clear_corrected"})
             flt = _ThinkFilter()
             with httpx.Client(timeout=120.0) as cli:
@@ -669,45 +687,45 @@ def _run_daemon_mode() -> None:
                         if data.get("done"):
                             tokens = data.get("eval_count", "?")
                             dur    = data.get("eval_duration", 0) / 1e9
-                            log(f"Correction terminée — {tokens} tokens en {dur:.1f}s", "OK")
+                            log(f"Correction done — {tokens} tokens in {dur:.1f}s", "OK")
                             break
                     tail = flt.flush()
                     if tail:
                         ui.send({"t": "corrected_chunk", "v": tail})
-            ui.send({"t": "status", "v": "✓  Correction terminée"})
+            ui.send({"t": "status", "v": "✓  Correction done"})
         except httpx.ConnectError:
-            log(f"Ollama inaccessible sur {OLLAMA_URL}", "ERR")
-            ui.send({"t": "status", "v": "✗  Ollama inaccessible — lancez : ollama serve"})
+            log(f"Ollama unreachable at {OLLAMA_URL}", "ERR")
+            ui.send({"t": "status", "v": "✗  Ollama unreachable — run: ollama serve"})
         except Exception as exc:
-            log(f"Erreur correction : {exc}", "ERR")
+            log(f"Correction error: {exc}", "ERR")
             ui.send({"t": "status", "v": f"✗  {str(exc)[:80]}"})
         finally:
             _correction_lock.release()
 
-    # ── Toggle enregistrement (mode FICHIER) ──────────────────────────────────
+    # ── Recording toggle (FILE mode) ──────────────────────────────────────────
     def _record_toggle() -> None:
         if _mode[0] != "FICHIER":
-            log("Record ignoré hors mode FICHIER", "WARN")
+            log("Record ignored outside FILE mode", "WARN")
             return
         if not _recording[0]:
-            log("Démarrage enregistrement…")
+            log("Starting recording…")
             _transcript[0] = ""
             ui.send({"t": "transcript", "v": ""})
             ui.send({"t": "clear_corrected"})
             audio.start_recording()
             ui.send({"t": "recording", "v": True})
-            ui.send({"t": "status",    "v": "⏺  Enregistrement…"})
+            ui.send({"t": "status",    "v": "⏺  Recording…"})
         else:
-            log("Arrêt enregistrement…")
+            log("Stopping recording…")
             raw_audio = audio.stop_recording()
             ui.send({"t": "recording", "v": False})
             if len(raw_audio) < SAMPLE_RATE * 0.5:
-                log("Enregistrement trop court (<0.5s)", "WARN")
-                ui.send({"t": "status", "v": "⚠  Enregistrement trop court"})
+                log("Recording too short (<0.5s)", "WARN")
+                ui.send({"t": "status", "v": "⚠  Recording too short"})
                 return
             dur = len(raw_audio) / SAMPLE_RATE
-            log(f"Transcription batch {dur:.1f}s…")
-            ui.send({"t": "status", "v": f"◎  Transcription batch ({dur:.1f}s)…"})
+            log(f"Batch transcription {dur:.1f}s…")
+            ui.send({"t": "status", "v": f"◎  Batch transcription ({dur:.1f}s)…"})
 
             def _batch() -> None:
                 text = parakeet.transcribe(raw_audio)
@@ -717,13 +735,13 @@ def _run_daemon_mode() -> None:
                     ui.send({"t": "transcript", "v": text})
                     _trigger_correction(text)
                 else:
-                    log("Transcription batch vide", "WARN")
-                    ui.send({"t": "status", "v": "⚠  Transcription vide"})
+                    log("Batch transcription empty", "WARN")
+                    ui.send({"t": "status", "v": "⚠  Transcription empty"})
 
             threading.Thread(target=_batch, daemon=True).start()
 
-    # ── Switch de mode ────────────────────────────────────────────────────────
-    _mode_item_ref = [None]   # référence au MenuItem rumps, défini plus tard
+    # ── Mode switch ───────────────────────────────────────────────────────────
+    _mode_item_ref = [None]   # reference to rumps MenuItem, set later
 
     def _set_mode(new_mode: str) -> None:
         if _mode[0] == new_mode:
@@ -735,13 +753,13 @@ def _run_daemon_mode() -> None:
         if new_mode == "STREAMING":
             audio.enable_streaming(True)
             if _mode_item_ref[0]:
-                _mode_item_ref[0].title = "Passer en mode FICHIER"
+                _mode_item_ref[0].title = "Switch to FILE mode"
         else:
             audio.enable_streaming(False)
             if _mode_item_ref[0]:
-                _mode_item_ref[0].title = "Passer en mode STREAMING"
+                _mode_item_ref[0].title = "Switch to STREAMING mode"
 
-    # ── Gestionnaire des commandes venant de l'UI ─────────────────────────────
+    # ── UI command handler ────────────────────────────────────────────────────
     _muted = [False]
 
     def _mute_toggle() -> None:
@@ -760,10 +778,16 @@ def _run_daemon_mode() -> None:
             threading.Thread(target=_record_toggle,      daemon=True).start()
         elif c == "mute_toggle":
             _mute_toggle()
+        elif c == "clear":
+            _transcript[0] = ""
+            ui.send({"t": "transcript",    "v": ""})
+            ui.send({"t": "clear_corrected"})
+        elif c == "exit":
+            rumps.quit_application()
 
-    _ui_cmd_handler[0] = handle_ui_command   # résoudre la dépendance circulaire
+    _ui_cmd_handler[0] = handle_ui_command   # resolve circular dependency
 
-    # ── Listener raccourcis clavier ───────────────────────────────────────────
+    # ── Keyboard shortcut listener ────────────────────────────────────────────
     class _HotkeyListener:
         _K = frozenset([keyboard.Key.cmd, keyboard.Key.shift,
                         keyboard.KeyCode.from_char("k")])
@@ -780,7 +804,7 @@ def _run_daemon_mode() -> None:
                     on_press   = self._press,
                     on_release = self._release,
                 ).start()
-                log("Listener clavier actif (Cmd+Shift+K / Cmd+Shift+R)", "OK")
+                log("Keyboard listener active (Cmd+Shift+K / Cmd+Shift+R)", "OK")
                 return True
             except Exception as exc:
                 log(f"pynput : {exc}", "ERR")
@@ -800,11 +824,11 @@ def _run_daemon_mode() -> None:
                 return
             if self._held >= self._K:
                 self._fired = True
-                log("Cmd+Shift+K détecté")
+                log("Cmd+Shift+K detected")
                 threading.Thread(target=_trigger_correction, daemon=True).start()
             elif self._held >= self._R:
                 self._fired = True
-                log("Cmd+Shift+R détecté")
+                log("Cmd+Shift+R detected")
                 threading.Thread(target=_record_toggle, daemon=True).start()
 
         def _release(self, key) -> None:
@@ -812,42 +836,42 @@ def _run_daemon_mode() -> None:
             if not self._held:
                 self._fired = False
 
-    # ── App rumps (menu bar macOS) ────────────────────────────────────────────
+    # ── rumps menu bar app ────────────────────────────────────────────────────
     class DicteeApp(rumps.App):
         def __init__(self) -> None:
             mode_item = rumps.MenuItem(
-                "Passer en mode FICHIER",
+                "Switch to FILE mode",
                 callback=self._on_mode_toggle,
             )
             _mode_item_ref[0] = mode_item
             super().__init__(
                 "✍️",
                 menu        = [mode_item, None],
-                quit_button = "Quitter",
+                quit_button = "Quit",
             )
             self._boot()
 
         def _boot(self) -> None:
-            # 1. Démarrer l'UI
+            # 1. Start UI
             ui.ensure_alive()
             ui.send({"t": "mode", "v": "STREAMING"})
 
-            # 2. Raccourcis clavier
+            # 2. Keyboard shortcuts
             ok = _HotkeyListener().start()
             if not ok:
                 ui.send({"t": "status",
-                         "v": "⚠  Accessibilité manquante — Préférences Système → Accessibilité"})
+                         "v": "⚠  Accessibility permission missing — System Settings → Accessibility"})
                 rumps.notification(
-                    "Dictée Correcteur",
-                    "Permission Accessibilité manquante",
-                    "Préférences Système → Confidentialité & Sécurité "
-                    "→ Accessibilité → activez Terminal.",
+                    "Dictation Corrector",
+                    "Accessibility permission missing",
+                    "System Settings → Privacy & Security "
+                    "→ Accessibility → enable Terminal.",
                     sound=True,
                 )
 
-            # 3. Ouvrir le flux micro + charger Parakeet async.
-            #    Le streaming n'est activé qu'une fois Parakeet prêt (callback on_ready)
-            #    → plus de messages "chunk ignoré" pendant le chargement.
+            # 3. Open mic stream + load Parakeet async.
+            #    Streaming only enabled once Parakeet is ready (on_ready callback)
+            #    → no "chunk dropped" messages during loading.
             audio.start_stream()
             parakeet.load_async(on_ready=lambda: audio.enable_streaming(True))
 
@@ -855,22 +879,22 @@ def _run_daemon_mode() -> None:
             new = "FICHIER" if _mode[0] == "STREAMING" else "STREAMING"
             _set_mode(new)
 
-    log("Dictée Correcteur v2 démarré.")
-    log("Cmd+Shift+K : correction  |  Cmd+Shift+R : enregistrement (mode FICHIER)")
+    log("Dictation Corrector v2 started.")
+    log("Cmd+Shift+K: correct  |  Cmd+Shift+R: record (FILE mode)")
     log(f"Ollama : {OLLAMA_URL}  modèle : {OLLAMA_MODEL}")
     log(f"Parakeet : {PARAKEET_MODEL}")
     DicteeApp().run()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Vérification au démarrage
+# Startup environment check
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _preflight() -> bool:
     """
-    Vérifie l'environnement avant le démarrage.
-    Affiche un résumé clair dans les logs.
-    Retourne False si un prérequis bloquant est absent.
+    Checks the environment before startup.
+    Prints a clear summary to stderr.
+    Returns False if a blocking prerequisite is missing.
     """
     import importlib, os
     ok_all = True
@@ -886,15 +910,15 @@ def _preflight() -> bool:
 
     sep = "─" * 52
     print(sep, file=sys.stderr, flush=True)
-    print("  Vérification de l'environnement", file=sys.stderr, flush=True)
+    print("  Environment check", file=sys.stderr, flush=True)
     print(sep, file=sys.stderr, flush=True)
 
     # ── Python ────────────────────────────────────────────────────────────────
     v = sys.version_info
     chk(f"Python {v.major}.{v.minor}.{v.micro}", v >= (3, 11),
-        detail="" if v >= (3, 11) else "Python 3.11+ requis")
+        detail="" if v >= (3, 11) else "Python 3.11+ required")
 
-    # ── Dépendances Python ────────────────────────────────────────────────────
+    # ── Python dependencies ───────────────────────────────────────────────────
     for pkg, import_name in [
         ("nemo_toolkit", "nemo"),
         ("sounddevice",  "sounddevice"),
@@ -916,12 +940,12 @@ def _preflight() -> bool:
         import torch
         mps = torch.backends.mps.is_available()
         chk(f"PyTorch {torch.__version__}", True,
-            "MPS (Apple Silicon)" if mps else "CPU uniquement (MPS indisponible)",
+            "MPS (Apple Silicon)" if mps else "CPU only (MPS unavailable)",
             blocking=False)
     except ImportError:
-        chk("PyTorch", False, "installé avec nemo_toolkit")
+        chk("PyTorch", False, "installed with nemo_toolkit")
 
-    # ── Modèle Parakeet en cache ──────────────────────────────────────────────
+    # ── Parakeet model cache ──────────────────────────────────────────────────
     cache_dir = os.path.join(
         os.path.expanduser("~"), ".cache", "huggingface", "hub",
         "models--nvidia--parakeet-tdt-0.6b-v3",
@@ -929,18 +953,18 @@ def _preflight() -> bool:
     cached = os.path.isdir(cache_dir)
     chk(f"Parakeet  {PARAKEET_MODEL}",
         cached,
-        "en cache" if cached else "sera téléchargé au 1er lancement (~600 MB)",
+        "cached" if cached else "will be downloaded on first run (~600 MB)",
         blocking=False)
 
-    # ── Micro (sounddevice) ───────────────────────────────────────────────────
+    # ── Microphone (sounddevice) ──────────────────────────────────────────────
     try:
         import sounddevice as sd
         devices    = sd.query_devices()
         input_devs = [d for d in devices if d["max_input_channels"] > 0]
         default    = sd.query_devices(kind="input")
-        chk("Micro", True, f"{default['name']!r}  ({len(input_devs)} entrée(s) détectée(s))")
+        chk("Microphone", True, f"{default['name']!r}  ({len(input_devs)} input(s) found)")
     except Exception as exc:
-        chk("Micro", False, str(exc)[:70])
+        chk("Microphone", False, str(exc)[:70])
 
     # ── Ollama ────────────────────────────────────────────────────────────────
     try:
@@ -952,27 +976,27 @@ def _preflight() -> bool:
             m == OLLAMA_MODEL or m.startswith(OLLAMA_MODEL.split(":")[0])
             for m in models_available
         )
-        chk(f"Modèle  {OLLAMA_MODEL}", model_present,
-            "disponible" if model_present else
-            f"non trouvé — lancez : ollama pull {OLLAMA_MODEL}")
+        chk(f"Model  {OLLAMA_MODEL}", model_present,
+            "available" if model_present else
+            f"not found — run: ollama pull {OLLAMA_MODEL}")
     except httpx.ConnectError:
-        chk("Ollama", False, f"inaccessible sur {OLLAMA_URL} — lancez : ollama serve")
-        chk(f"Modèle  {OLLAMA_MODEL}", False, "Ollama non disponible")
+        chk("Ollama", False, f"unreachable at {OLLAMA_URL} — run: ollama serve")
+        chk(f"Model  {OLLAMA_MODEL}", False, "Ollama not available")
     except Exception as exc:
         chk("Ollama", False, str(exc)[:70])
 
     print(sep, file=sys.stderr, flush=True)
     if ok_all:
-        print("  ✓  Tout est prêt — démarrage.", file=sys.stderr, flush=True)
+        print("  ✓  All good — starting.", file=sys.stderr, flush=True)
     else:
-        print("  ✗  Des prérequis bloquants sont manquants (voir ✗ ci-dessus).", file=sys.stderr, flush=True)
+        print("  ✗  Blocking prerequisites missing (see ✗ above).", file=sys.stderr, flush=True)
     print(sep, file=sys.stderr, flush=True)
 
     return ok_all
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Point d'entrée
+# Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
