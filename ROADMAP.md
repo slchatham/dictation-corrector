@@ -17,7 +17,7 @@
 ### UX / Interface
 - [x] **Interface en anglais** — tous les labels, boutons, statuts, commentaires et nom du script en anglais
 - [x] **Bouton Exit** — arrêt propre de l'application depuis la fenêtre (évite Ctrl-C)
-- [ ] **Palette color-blind friendly** — remplacer rouge/vert par des combinaisons accessibles (ex : bleu/orange, avec icônes en complément de la couleur)
+- [x] **Palette color-blind friendly** — orange (#fab387) remplace rouge, bleu (#89b4fa) remplace vert ; icônes 🎙/🔇 ⏺/⏹ comme signal de forme indépendant
 
 ### Audio / Transcription
 - [x] **Augmenter CHUNK_SECONDS** (4s) — donne plus de contexte à Parakeet, réduit les coupures au milieu des phrases et améliore la ponctuation automatique

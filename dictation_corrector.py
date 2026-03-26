@@ -132,7 +132,9 @@ def _run_ui_mode() -> None:
 
     log("UI mode started")
 
-    # ── Catppuccin Mocha palette ──────────────────────────────────────────────
+    # ── Catppuccin Mocha palette (color-blind friendly) ───────────────────────
+    # Red and green replaced by orange and blue — distinguishable under
+    # deuteranopia/protanopia. Icons provide shape cues independent of color.
     C = dict(
         bg      = "#1e1e2e",
         surface = "#313244",
@@ -140,9 +142,8 @@ def _run_ui_mode() -> None:
         text    = "#cdd6f4",
         sub     = "#a6adc8",
         dim     = "#585b70",
-        blue    = "#89b4fa",
-        green   = "#a6e3a1",
-        red     = "#f38ba8",
+        blue    = "#89b4fa",   # active / info
+        orange  = "#fab387",   # stop / danger / quit  (replaces red)
         yellow  = "#f9e2af",
         teal    = "#94e2d5",
     )
@@ -247,7 +248,7 @@ def _run_ui_mode() -> None:
     mute_var = tk.StringVar(value="🎙 Active")
     mute_btn = tk.Button(
         bf, textvariable=mute_var,
-        bg=C["surface"], fg=C["green"], activebackground=C["overlay"],
+        bg=C["surface"], fg=C["blue"], activebackground=C["overlay"],
         font=("Helvetica Neue", 11), bd=0, relief="flat", padx=12, pady=7,
         command=lambda: send_cmd({"cmd": "mute_toggle"}),
     )
@@ -283,7 +284,7 @@ def _run_ui_mode() -> None:
 
     tk.Button(
         bf, text="Quit",
-        bg=C["red"], fg=C["bg"], activebackground=C["overlay"],
+        bg=C["orange"], fg=C["bg"], activebackground=C["overlay"],
         font=("Helvetica Neue", 11, "bold"), bd=0, relief="flat", padx=12, pady=7,
         command=_exit,
     ).pack(side="right", padx=(0, 8))
@@ -322,7 +323,7 @@ def _run_ui_mode() -> None:
         elif t == "recording":
             if v:
                 rec_var.set("⏹  Stop")
-                rec_btn.config(bg=C["red"], fg=C["bg"])
+                rec_btn.config(bg=C["orange"], fg=C["bg"])
             else:
                 rec_var.set("⏺  Record")
                 rec_btn.config(bg=C["surface"], fg=C["text"])
@@ -332,7 +333,7 @@ def _run_ui_mode() -> None:
                 mute_btn.config(bg=C["overlay"], fg=C["dim"])
             else:
                 mute_var.set("🎙 Active")
-                mute_btn.config(bg=C["surface"], fg=C["green"])
+                mute_btn.config(bg=C["surface"], fg=C["blue"])
 
     # ── Stdin reader (background thread) ─────────────────────────────────────
     def read_stdin() -> None:
