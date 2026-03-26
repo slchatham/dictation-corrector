@@ -40,7 +40,8 @@ OLLAMA_URL     = "http://localhost:11434/api/generate"
 OLLAMA_MODEL   = "qwen3.5:4b"
 PARAKEET_MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE    = 16000
-CHUNK_SECONDS  = 4
+CHUNK_SECONDS        = 4
+IMPORT_CHUNK_SECONDS = 12 * 60   # 12 min per chunk — within Parakeet's full-attention range
 
 SYSTEM_PROMPT = """\
 Tu es un correcteur de dictée vocale pour un auteur bilingue français/anglais.
@@ -678,14 +679,15 @@ def _run_daemon_mode() -> None:
             return
         threading.Thread(target=_run_correction, args=(text,), daemon=True).start()
 
-    def _run_correction(text: str) -> None:
+    def _run_correction(text: str, clear: bool = True) -> None:
         if not _correction_lock.acquire(blocking=False):
             log("Correction already in progress", "WARN")
             return
         try:
             log(f"LLM correction ({len(text)} chars)…")
             ui.send({"t": "status", "v": "✦  Correcting…"})
-            ui.send({"t": "clear_corrected"})
+            if clear:
+                ui.send({"t": "clear_corrected"})
             flt = _ThinkFilter()
             with httpx.Client(timeout=120.0) as cli:
                 with cli.stream("POST", OLLAMA_URL, json={
@@ -765,24 +767,49 @@ def _run_daemon_mode() -> None:
         import librosa
         name = os.path.basename(path)
         log(f"Importing {name}…")
-        ui.send({"t": "status",        "v": f"⟳  Loading {name}…"})
-        ui.send({"t": "transcript",    "v": ""})
+        ui.send({"t": "status",     "v": f"⟳  Loading {name}…"})
+        ui.send({"t": "transcript", "v": ""})
         ui.send({"t": "clear_corrected"})
         _transcript[0] = ""
         try:
             audio_np, _ = librosa.load(path, sr=SAMPLE_RATE, mono=True)
-            dur = len(audio_np) / SAMPLE_RATE
-            log(f"Transcribing {name} ({dur:.1f}s)…")
-            ui.send({"t": "status", "v": f"◎  Transcribing {name} ({dur:.1f}s)…"})
-            text = parakeet.transcribe(audio_np)
-            if text:
-                _transcript[0] = text
-                log(f"Import → '{text[:80]}'", "OK")
-                ui.send({"t": "transcript", "v": text})
-                _trigger_correction(text)
-            else:
-                log("Import transcription empty", "WARN")
-                ui.send({"t": "status", "v": "⚠  Transcription empty"})
+            total_dur = len(audio_np) / SAMPLE_RATE
+            log(f"Loaded {name}: {total_dur/60:.1f} min")
+
+            chunk_len = SAMPLE_RATE * IMPORT_CHUNK_SECONDS
+            starts    = list(range(0, len(audio_np), chunk_len))
+            n_chunks  = len(starts)
+
+            for i, start in enumerate(starts):
+                chunk     = audio_np[start : start + chunk_len]
+                chunk_dur = len(chunk) / SAMPLE_RATE
+                t_start   = start / SAMPLE_RATE / 60
+                t_end     = (start + len(chunk)) / SAMPLE_RATE / 60
+                log(f"Chunk {i+1}/{n_chunks}: {t_start:.1f}–{t_end:.1f} min ({chunk_dur:.0f}s)")
+                ui.send({"t": "status",
+                         "v": f"◎  Chunk {i+1}/{n_chunks} — Transcribing ({chunk_dur/60:.1f} min)…"})
+
+                text = parakeet.transcribe(chunk)
+                if not text:
+                    log(f"Chunk {i+1}/{n_chunks}: empty transcription", "WARN")
+                    continue
+
+                log(f"Chunk {i+1}/{n_chunks} transcribed → '{text[:60]}'", "OK")
+                sep = "\n\n" if _transcript[0] else ""
+                _transcript[0] += sep + text
+                ui.send({"t": "transcript", "v": _transcript[0]})
+
+                # Separator between corrected chunks in the correction zone
+                if i > 0:
+                    ui.send({"t": "corrected_chunk", "v": "\n\n"})
+
+                ui.send({"t": "status",
+                         "v": f"✦  Chunk {i+1}/{n_chunks} — Correcting…"})
+                _run_correction(text, clear=(i == 0))
+
+            ui.send({"t": "status",
+                     "v": f"✓  Import done — {n_chunks} chunk(s), {total_dur/60:.1f} min"})
+
         except Exception as exc:
             log(f"Import error: {exc}", "ERR")
             ui.send({"t": "status", "v": f"✗  Import error: {str(exc)[:60]}"})
