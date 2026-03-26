@@ -30,5 +30,8 @@ build/
 # Internal notes
 ROADMAP.md
 
+# Audio input files
+inputs/
+
 # Logs
 *.log
