@@ -27,5 +27,8 @@ build/
 .vscode/
 .idea/
 
+# Internal notes
+ROADMAP.md
+
 # Logs
 *.log
