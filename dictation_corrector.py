@@ -804,16 +804,30 @@ def _run_daemon_mode() -> None:
             starts    = list(range(0, len(audio_np), chunk_len))
             n_chunks  = len(starts)
 
+            def _transcribe_timed(chunk: np.ndarray, label: str) -> str:
+                """Transcribe while updating status bar with elapsed seconds."""
+                import time
+                stop = threading.Event()
+                def _tick() -> None:
+                    t0 = time.time()
+                    while not stop.wait(1.0):
+                        ui.send({"t": "status",
+                                 "v": f"◎  {label} ({int(time.time() - t0)}s)…"})
+                threading.Thread(target=_tick, daemon=True).start()
+                try:
+                    return parakeet.transcribe(chunk)
+                finally:
+                    stop.set()
+
             for i, start in enumerate(starts):
                 chunk     = audio_np[start : start + chunk_len]
                 chunk_dur = len(chunk) / SAMPLE_RATE
                 t_start   = start / SAMPLE_RATE / 60
                 t_end     = (start + len(chunk)) / SAMPLE_RATE / 60
                 log(f"Chunk {i+1}/{n_chunks}: {t_start:.1f}–{t_end:.1f} min ({chunk_dur:.0f}s)")
-                ui.send({"t": "status",
-                         "v": f"◎  Chunk {i+1}/{n_chunks} — Transcribing ({chunk_dur/60:.1f} min)…"})
+                label = f"Chunk {i+1}/{n_chunks} — Transcribing ({chunk_dur/60:.1f} min)"
 
-                text = parakeet.transcribe(chunk)
+                text = _transcribe_timed(chunk, label)
                 if not text:
                     log(f"Chunk {i+1}/{n_chunks}: empty transcription", "WARN")
                     continue
