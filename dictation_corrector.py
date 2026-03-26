@@ -254,6 +254,25 @@ def _run_ui_mode() -> None:
     )
     mute_btn.pack(side="left", padx=(0, 8))
 
+    def _pick_file() -> None:
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="Import audio file",
+            filetypes=[
+                ("Audio files", "*.wav *.mp3 *.m4a *.flac *.ogg"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            send_cmd({"cmd": "import_file", "path": path})
+
+    tk.Button(
+        bf, text="Import…",
+        bg=C["surface"], fg=C["sub"], activebackground=C["overlay"],
+        font=("Helvetica Neue", 11), bd=0, relief="flat", padx=12, pady=7,
+        command=_pick_file,
+    ).pack(side="left", padx=(0, 8))
+
     def copy_corrected() -> None:
         w_corr.config(state="normal")
         text = w_corr.get("1.0", "end").strip()
@@ -741,6 +760,33 @@ def _run_daemon_mode() -> None:
 
             threading.Thread(target=_batch, daemon=True).start()
 
+    # ── Audio file import (WAV / MP3 / M4A / FLAC / OGG) ─────────────────────
+    def _import_file(path: str) -> None:
+        import librosa
+        name = os.path.basename(path)
+        log(f"Importing {name}…")
+        ui.send({"t": "status",        "v": f"⟳  Loading {name}…"})
+        ui.send({"t": "transcript",    "v": ""})
+        ui.send({"t": "clear_corrected"})
+        _transcript[0] = ""
+        try:
+            audio_np, _ = librosa.load(path, sr=SAMPLE_RATE, mono=True)
+            dur = len(audio_np) / SAMPLE_RATE
+            log(f"Transcribing {name} ({dur:.1f}s)…")
+            ui.send({"t": "status", "v": f"◎  Transcribing {name} ({dur:.1f}s)…"})
+            text = parakeet.transcribe(audio_np)
+            if text:
+                _transcript[0] = text
+                log(f"Import → '{text[:80]}'", "OK")
+                ui.send({"t": "transcript", "v": text})
+                _trigger_correction(text)
+            else:
+                log("Import transcription empty", "WARN")
+                ui.send({"t": "status", "v": "⚠  Transcription empty"})
+        except Exception as exc:
+            log(f"Import error: {exc}", "ERR")
+            ui.send({"t": "status", "v": f"✗  Import error: {str(exc)[:60]}"})
+
     # ── Mode switch ───────────────────────────────────────────────────────────
     _mode_item_ref = [None]   # reference to rumps MenuItem, set later
 
@@ -783,6 +829,10 @@ def _run_daemon_mode() -> None:
             _transcript[0] = ""
             ui.send({"t": "transcript",    "v": ""})
             ui.send({"t": "clear_corrected"})
+        elif c == "import_file":
+            path = cmd.get("path", "")
+            if path:
+                threading.Thread(target=_import_file, args=(path,), daemon=True).start()
         elif c == "exit":
             rumps.quit_application()
 

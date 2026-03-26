@@ -125,6 +125,7 @@ An environment check runs first (Python version, packages, PyTorch/MPS, Parakeet
 | 🎙 Active / 🔇 Muted | Toggle microphone |
 | Copy | Copy corrected text to clipboard |
 | Clear | Clear both transcript and correction buffers |
+| Import… | Open a WAV / MP3 / M4A / FLAC / OGG file, transcribe and correct it |
 | Quit | Clean shutdown |
 
 ---
@@ -134,6 +135,8 @@ An environment check runs first (Python version, packages, PyTorch/MPS, Parakeet
 **STREAMING** — continuous capture, transcribed every 4 s, correction triggered manually (`Cmd+Shift+K` or button).
 
 **FILE** — press `Cmd+Shift+R` to start, press again to stop; the full recording is transcribed as a single batch and corrected automatically.
+
+**Import** — click `Import…` to open an existing audio file (WAV, MP3, M4A, FLAC, OGG). The file is loaded via librosa (requires `ffmpeg` for MP3/M4A), resampled to 16 kHz mono, then passed through the same Parakeet → Qwen pipeline. Requires `brew install ffmpeg` for non-WAV formats.
 
 ---
 
